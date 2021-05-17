@@ -12,29 +12,17 @@ import pickle as pkl
 
 from video import VideoRecorder
 from logger import Logger
-from replay_buffer import ReplayBuffer
+from replay_buffer import ReplayMemoryFast
 import utils
 
-import dmc2gym
+from models.carla_wrapper import DummyWrapper
 import hydra
 
 
 def make_env(cfg):
     """Helper function to create dm_control environment"""
-    if cfg.env == 'ball_in_cup_catch':
-        domain_name = 'ball_in_cup'
-        task_name = 'catch'
-    else:
-        domain_name = cfg.env.split('_')[0]
-        task_name = '_'.join(cfg.env.split('_')[1:])
-
-    env = dmc2gym.make(domain_name=domain_name,
-                       task_name=task_name,
-                       seed=cfg.seed,
-                       visualize_reward=True)
-    env.seed(cfg.seed)
-    assert env.action_space.low.min() >= -1
-    assert env.action_space.high.max() <= 1
+    env = DummyWrapper(cfg)
+    # env.seed(cfg.seed)
 
     return env
 
@@ -53,9 +41,9 @@ class Workspace(object):
 
         utils.set_seed_everywhere(cfg.seed)
         self.device = torch.device(cfg.device)
-        self.env = utils.make_env(cfg)
+        self.env = DummyWrapper({'steps': 100})
 
-        cfg.agent.params.obs_dim = self.env.observation_space.shape[0]
+        cfg.agent.params.obs_dim = 1152
         cfg.agent.params.action_dim = self.env.action_space.shape[0]
         cfg.agent.params.action_range = [
             float(self.env.action_space.low.min()),
@@ -63,13 +51,8 @@ class Workspace(object):
         ]
         self.agent = hydra.utils.instantiate(cfg.agent)
 
-        self.replay_buffer = ReplayBuffer(self.env.observation_space.shape,
-                                          self.env.action_space.shape,
-                                          int(cfg.replay_buffer_capacity),
-                                          self.device)
+        self.replay_buffer = ReplayMemoryFast(memory_size=1024, minibatch_size=16)
 
-        self.video_recorder = VideoRecorder(
-            self.work_dir if cfg.save_video else None)
         self.step = 0
 
     def evaluate(self):
@@ -77,25 +60,26 @@ class Workspace(object):
         for episode in range(self.cfg.num_eval_episodes):
             obs = self.env.reset()
             self.agent.reset()
-            self.video_recorder.init(enabled=(episode == 0))
+            # self.video_recorder.init(enabled=(episode == 0))
             done = False
             episode_reward = 0
             while not done:
                 with utils.eval_mode(self.agent):
                     action = self.agent.act(obs, sample=False)
                 obs, reward, done, _ = self.env.step(action)
-                self.video_recorder.record(self.env)
+                # self.video_recorder.record(self.env)
                 episode_reward += reward
 
             average_episode_reward += episode_reward
-            self.video_recorder.save(f'{self.step}.mp4')
+            # self.video_recorder.save(f'{self.step}.mp4')
         average_episode_reward /= self.cfg.num_eval_episodes
         self.logger.log('eval/episode_reward', average_episode_reward,
                         self.step)
         self.logger.dump(self.step)
 
     def run(self):
-        episode, episode_reward, done = 0, 0, True
+        episode, episode_reward, done, episode_step = 0, 0, 0, True
+        obs = self.env.reset()
         start_time = time.time()
         while self.step < self.cfg.num_train_steps:
             if done:
@@ -138,11 +122,10 @@ class Workspace(object):
 
             # allow infinite bootstrap
             done = float(done)
-            done_no_max = 0 if episode_step + 1 == self.env._max_episode_steps else done
+            done_no_max = 0 if episode_step + 1 == self.env.max_episode_steps else done
             episode_reward += reward
 
-            self.replay_buffer.add(obs, action, reward, next_obs, done,
-                                   done_no_max)
+            self.replay_buffer.add(obs, action, reward, next_obs, done, done_no_max)
 
             obs = next_obs
             episode_step += 1

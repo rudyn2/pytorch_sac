@@ -5,7 +5,7 @@ import torch.nn.functional as F
 import math
 
 from agent import Agent
-import utils
+import pytorch_sac.utils as utils
 
 import hydra
 
@@ -66,22 +66,24 @@ class SACAgent(Agent):
         return self.log_alpha.exp()
 
     def act(self, obs, sample=False):
-        obs = torch.FloatTensor(obs).to(self.device)
-        obs = obs.unsqueeze(0)
+        obs['visual'] = obs['visual'].to(self.device)
+        obs['state'] = obs['state'].to(self.device)
         dist = self.actor(obs)
         action = dist.sample() if sample else dist.mean
         action = action.clamp(*self.action_range)
-        assert action.ndim == 2 and action.shape[0] == 1
+        # assert action.ndim == 2 and action.shape[0] == 1
         return utils.to_np(action[0])
 
     def update_critic(self, obs, action, reward, next_obs, not_done, logger,
                       step):
+        reward = torch.tensor(reward, device=self.device)
+        not_done = torch.tensor(not_done, device=self.device)
+
         dist = self.actor(next_obs)
         next_action = dist.rsample()
-        log_prob = dist.log_prob(next_action).sum(-1, keepdim=True)
+        log_prob = dist.log_prob(next_action).sum(-1, keepdim=False)
         target_Q1, target_Q2 = self.critic_target(next_obs, next_action)
-        target_V = torch.min(target_Q1,
-                             target_Q2) - self.alpha.detach() * log_prob
+        target_V = torch.min(target_Q1, target_Q2) - self.alpha.detach() * log_prob
         target_Q = reward + (not_done * self.discount * target_V)
         target_Q = target_Q.detach()
 
@@ -128,10 +130,9 @@ class SACAgent(Agent):
             self.log_alpha_optimizer.step()
 
     def update(self, replay_buffer, logger, step):
-        obs, action, reward, next_obs, not_done, not_done_no_max = replay_buffer.sample(
-            self.batch_size)
+        obs, action, reward, next_obs, not_done, not_done_no_max = replay_buffer.sample(self.batch_size)
 
-        logger.log('train/batch_reward', reward.mean(), step)
+        logger.log('train/batch_reward', np.array(reward).mean(), step)
 
         self.update_critic(obs, action, reward, next_obs, not_done_no_max,
                            logger, step)
