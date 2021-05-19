@@ -1,13 +1,10 @@
+import os
+import random
+
 import numpy as np
 import torch
 from torch import nn
-from torch import distributions as pyd
-import torch.nn.functional as F
-import gym
-import os
-from collections import deque
-import random
-import math
+
 from models.carla_wrapper import DummyWrapper
 
 
@@ -55,6 +52,7 @@ def soft_update_params(net, target_net, tau):
         target_param.data.copy_(tau * param.data +
                                 (1 - tau) * target_param.data)
 
+
 def set_seed_everywhere(seed):
     torch.manual_seed(seed)
     if torch.cuda.is_available():
@@ -70,6 +68,7 @@ def make_dir(*path_parts):
     except OSError:
         pass
     return dir_path
+
 
 def weight_init(m):
     """Custom weight init for Conv2D and Linear layers."""
@@ -107,6 +106,7 @@ def mlp(input_dim, hidden_dim, output_dim, hidden_depth, output_mod=None):
         mods.append(output_mod)
     trunk = nn.Sequential(*mods)
     return trunk
+
 
 def to_np(t):
     if t is None:
