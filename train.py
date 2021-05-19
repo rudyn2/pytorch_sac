@@ -51,7 +51,7 @@ class Workspace(object):
         ]
         self.agent = hydra.utils.instantiate(cfg.agent)
 
-        self.replay_buffer = ReplayMemoryFast(memory_size=1024, minibatch_size=16)
+        self.replay_buffer = ReplayMemoryFast(memory_size=1024)
 
         self.step = 0
 
